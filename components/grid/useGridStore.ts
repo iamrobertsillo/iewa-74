@@ -20,4 +20,11 @@ export const useGridStore = create<GridStore>((set) => ({
   selectedTile: null,
   setTiles: (tiles) => set({ tiles }),
   selectTile: (tile) => set({ selectedTile: tile }),
+
+  updateTileImage: (x, y, image) =>
+    set((state) => ({
+      tiles: state.tiles.map((t) =>
+        t.x === x && t.y === y ? { ...t, image } : t
+      ),
+  })),
 }));
