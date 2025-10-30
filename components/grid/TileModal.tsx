@@ -5,12 +5,12 @@ import FilerobotImageEditor, {
   TABS,
   TOOLS,
 } from 'react-filerobot-image-editor';
-import { useGridStore } from './useGridStore';
+import { Tile, useGridStore } from './useGridStore';
 import { saveTileImage } from './utils/api';
 
 
 interface TileModalProps {
-  tile: { x: number; y: number };
+  tile: Tile;   // <- uses the Tile type from your store
   onClose: () => void;
 }
 
