@@ -8,6 +8,12 @@ import { fetchGridTiles } from './utils/api';
 const ROWS = 10;
 const COLS = 10;
 
+type Tile = {
+  x: number;
+  y: number;
+  status: 'available' | 'sold';
+};
+
 export default function GridCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const { tiles, setTiles, selectTile } = useGridStore();
