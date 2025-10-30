@@ -62,12 +62,14 @@ export const TileModal: React.FC<TileModalProps> = ({ tile, onClose }) => {
         </div>
       ) : (
         <FilerobotImageEditor
-          source=""
-          onSave={handleSave}
-          onClose={closeEditor}
-          tabsIds={[TABS.ADJUST, TABS.ANNOTATE, TABS.WATERMARK]}
-          defaultTabId={TABS.ANNOTATE}
-          defaultToolId={TOOLS.TEXT}
+          source={tile.image || ''}            // the tile’s current image or empty string
+          onSave={handleSave}                  // function called when user saves
+          onClose={onClose}                    // function called when user closes editor
+          savingPixelRatio={1}                 // ✅ required by TypeScript
+          previewPixelRatio={1}                // ✅ required by TypeScript
+          tabsIds={['Adjust', 'Annotate', 'Watermark']}
+          defaultTabId="Annotate"
+          defaultToolId="Text"
         />
       )}
     </div>
