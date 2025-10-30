@@ -37,7 +37,11 @@ export default function GridCanvas() {
   useEffect(() => {
     const loadTiles = async () => {
       const data = await fetchGridTiles();
-      setTiles(data.tiles);
+      const tiles: Tile[] = data.tiles.map(tile => ({
+        ...tile,
+        status: tile.status as 'available' | 'sold', // cast to match Tile type
+      }));
+      setTiles(tiles);
     };
     loadTiles();
   }, [setTiles]);
