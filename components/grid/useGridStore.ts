@@ -1,23 +1,24 @@
-'use client';
 import { create } from 'zustand';
 
-export interface Tile {
+export type Tile = {
   x: number;
   y: number;
   status: 'available' | 'sold';
   image?: string;
-}
+};
 
-interface GridStore {
+type GridStore = {
   tiles: Tile[];
-  selectedTile: Tile | null;
+  selectedTile?: Tile;
   setTiles: (tiles: Tile[]) => void;
-  selectTile: (tile: Tile | null) => void;
-}
+  selectTile: (tile: Tile) => void;
+  updateTileImage: (x: number, y: number, image: string) => void; // ✅ MUST exist here
+};
 
 export const useGridStore = create<GridStore>((set) => ({
   tiles: [],
-  selectedTile: null,
+  selectedTile: undefined,
+
   setTiles: (tiles) => set({ tiles }),
   selectTile: (tile) => set({ selectedTile: tile }),
 
@@ -26,5 +27,5 @@ export const useGridStore = create<GridStore>((set) => ({
       tiles: state.tiles.map((t) =>
         t.x === x && t.y === y ? { ...t, image } : t
       ),
-  })),
+    })),
 }));
