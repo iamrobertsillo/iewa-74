@@ -5,6 +5,7 @@ export type Tile = {
   y: number;
   status: 'available' | 'sold';
   image?: string;
+  filled?: boolean;
 };
 
 type GridStore = {
