@@ -208,7 +208,7 @@ export default function VirtualizedPixiGrid() {
   }, [rows, viewport.height]);
 
   // 🔹 Viewport constraints
-  const constrainViewport = useCallback((xOffset, yOffset, scale) => {
+  const constrainViewport = useCallback((xOffset: number, yOffset: number, scale: number) => {
     const { minScale, maxScale } = getZoomConstraints();
     const constrainedScale = Math.max(minScale, Math.min(maxScale, scale));
     const scaledTileSize = TILE_SIZE * constrainedScale;
@@ -252,7 +252,8 @@ export default function VirtualizedPixiGrid() {
 
   // 🚀 OPTIMIZATION 2 & 6: Batched drawing with LOD (Level of Detail)
   const drawGrid = useCallback(
-    (g) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (g: any) => {
       if (!g) return;
       g.clear();
 
@@ -365,7 +366,8 @@ export default function VirtualizedPixiGrid() {
 
   // 🔹 Tile click (only fires if not dragging)
   const handlePointerDown = useCallback(
-    (event) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (event: any) => {
       const container = containerRef.current;
       if (!container) return;
 
@@ -377,7 +379,8 @@ export default function VirtualizedPixiGrid() {
   );
 
   const handlePointerMove = useCallback(
-    (event) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (event: any) => {
       // Track movement within PixiJS canvas
       if (pointerDownPos.current.x !== 0 || pointerDownPos.current.y !== 0) {
         const container = containerRef.current;
@@ -396,7 +399,8 @@ export default function VirtualizedPixiGrid() {
   );
 
   const handlePointerUp = useCallback(
-    (event) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (event: any) => {
       // Only trigger click if user didn't drag
       if (!hasMoved.current) {
         const container = containerRef.current;
@@ -435,14 +439,14 @@ export default function VirtualizedPixiGrid() {
   }, [handlePointerDown, handlePointerMove, handlePointerUp, isGraphicsMounted]);
 
   // 🔹 Panning with drag detection
-  const handlePanStart = useCallback((e) => {
+  const handlePanStart = useCallback((e: React.MouseEvent) => {
     isPanning.current = true;
     setIsPanningState(true);
     lastPointerPos.current = { x: e.clientX, y: e.clientY };
     hasMoved.current = false; // Reset movement flag
   }, []);
 
-  const handlePanMove = useCallback((e) => {
+  const handlePanMove = useCallback((e: React.MouseEvent) => {
     if (!isPanning.current) return;
     const dx = e.clientX - lastPointerPos.current.x;
     const dy = e.clientY - lastPointerPos.current.y;
@@ -466,7 +470,7 @@ export default function VirtualizedPixiGrid() {
   }, []);
 
   // 🔹 Wheel zoom
-  const handleWheel = useCallback((e) => {
+  const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
     const delta = -e.deltaY * ZOOM_SPEED;
     const newScale = targetViewport.current.scale * (1 + delta);
