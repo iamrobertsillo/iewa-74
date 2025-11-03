@@ -1,12 +1,8 @@
 'use client';
 
-import React from 'react';
-import GridCanvas from '../../components/grid/GridCanvas';
+import dynamic from 'next/dynamic';
+const PixiGridComponent = dynamic(() => import('../../components/grid/GridCanvas'), { ssr: false });
 
-export default function GridPage() {
-  return (
-    <div style={{ width: '100vw', height: '100vh' }}>
-      <GridCanvas />
-    </div>
-  );
+export default function Home() {
+  return <PixiGridComponent width={1200} height={800} />;
 }
