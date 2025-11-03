@@ -54,7 +54,7 @@
  * - Quadtree spatial indexing
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { Application, extend } from '@pixi/react';
 import { Graphics, Container, Rectangle, Sprite, Texture } from 'pixi.js';
 
@@ -64,6 +64,7 @@ const TILE_SIZE = 50;
 const INITIAL_ROWS = 10;
 const INITIAL_COLS = 10;
 const MIN_VISIBLE_TILES = 10;
+const MAX_VISIBLE_TILES = 100; // Maximum tiles visible (limits zoom out for performance)
 const ZOOM_SPEED = 0.001;
 const LERP_FACTOR = 0.15;
 
@@ -199,11 +200,22 @@ export default function VirtualizedPixiGrid() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // 🔹 Zoom limits
+  // 🔹 Zoom limits (optimized for performance and UX)
   const getZoomConstraints = useCallback(() => {
-    const gridHeight = rows * TILE_SIZE;
-    const minScale = viewport.height / gridHeight;
+    // Maximum zoom in: show at least MIN_VISIBLE_TILES (e.g., 10 tiles vertically)
     const maxScale = viewport.height / (MIN_VISIBLE_TILES * TILE_SIZE);
+
+    // Minimum zoom out: show at most MAX_VISIBLE_TILES (e.g., 100 tiles vertically)
+    // This prevents excessive zoom out that could impact performance
+    const performanceMinScale = viewport.height / (MAX_VISIBLE_TILES * TILE_SIZE);
+
+    // Also ensure we can see the entire grid height
+    const gridHeight = rows * TILE_SIZE;
+    const gridMinScale = viewport.height / gridHeight;
+
+    // Use the larger of the two minimum scales (more restrictive)
+    const minScale = Math.max(performanceMinScale, gridMinScale);
+
     return { minScale, maxScale };
   }, [rows, viewport.height]);
 
@@ -517,6 +529,19 @@ export default function VirtualizedPixiGrid() {
   const storedTiles = tileData.size;
   const memoryReduction = totalTiles > 0 ? Math.round((1 - storedTiles / totalTiles) * 100) : 0;
 
+  // Calculate zoom limits for display
+  const { minScale, maxScale } = useMemo(() => {
+    const maxS = viewport.height / (MIN_VISIBLE_TILES * TILE_SIZE);
+    const performanceMinS = viewport.height / (MAX_VISIBLE_TILES * TILE_SIZE);
+    const gridHeight = rows * TILE_SIZE;
+    const gridMinS = viewport.height / gridHeight;
+    const minS = Math.max(performanceMinS, gridMinS);
+    return { minScale: minS, maxScale: maxS };
+  }, [rows, viewport.height]);
+
+  const isAtMinZoom = viewport.scale <= minScale + 0.001;
+  const isAtMaxZoom = viewport.scale >= maxScale - 0.001;
+
   return (
     <>
       <button
@@ -582,12 +607,18 @@ export default function VirtualizedPixiGrid() {
           <div style={{ color: '#4caf50' }}>
             Memory Saved: {memoryReduction}%
           </div>
-          <div style={{ marginTop: 8 }}>Zoom: {viewport.scale.toFixed(3)}x</div>
+          <div style={{ marginTop: 8 }}>
+            Zoom: {viewport.scale.toFixed(3)}x
+            {isAtMinZoom && <span style={{ color: '#ff9800', marginLeft: 8 }}>⚠ Min</span>}
+            {isAtMaxZoom && <span style={{ color: '#ff9800', marginLeft: 8 }}>⚠ Max</span>}
+          </div>
           <div>
             LOD: {viewport.scale < LOD_MINIMAL_SCALE ? 'Minimal' : viewport.scale < LOD_LOW_SCALE ? 'Low' : 'Full'}
           </div>
           <div style={{ marginTop: 8, fontSize: 11, color: '#aaa' }}>
-            Tip: Zoom out to see LOD optimizations
+            {isAtMinZoom ? '⚠ Max zoom out reached (optimized for performance)' :
+             isAtMaxZoom ? '⚠ Max zoom in reached' :
+             'Scroll to zoom, drag to pan'}
           </div>
         </div>
       )}
