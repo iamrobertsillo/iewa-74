@@ -54,7 +54,7 @@
  * - Quadtree spatial indexing
  */
 
-import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { Application, extend } from '@pixi/react';
 import { Graphics, Container, Rectangle, Sprite, Texture } from 'pixi.js';
 
@@ -92,10 +92,23 @@ interface TileData {
   imageUrl?: string;
 }
 
+// Props interface
+interface GridCanvasProps {
+  onTileClick?: (row: number, col: number, tileData?: TileData) => void;
+  selectedTiles?: Set<string>; // Pass selected tiles from parent
+  onSelectionChange?: (startRow: number, startCol: number, endRow: number, endCol: number) => void;
+}
+
+// Exposed methods via ref
+export interface GridHandle {
+  setTileImage: (row: number, col: number, imageUrl: string) => void;
+  getTileData: () => Map<string, TileData>;
+}
+
 // Texture cache for uploaded images
 const textureCache = new Map<string, Texture>();
 
-export default function VirtualizedPixiGrid() {
+const VirtualizedPixiGrid = forwardRef<GridHandle, GridCanvasProps>(({ onTileClick, selectedTiles, onSelectionChange }, ref) => {
   const [rows, setRows] = useState(INITIAL_ROWS);
   const [cols, setCols] = useState(INITIAL_COLS);
   const graphicsRef = useRef(null);
@@ -103,6 +116,11 @@ export default function VirtualizedPixiGrid() {
   const spriteContainerRef = useRef(null);
   const [isGraphicsMounted, setIsGraphicsMounted] = useState(false);
   const [showStats, setShowStats] = useState(false);
+
+  // Selection state for drag-to-select
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const selectionStartTile = useRef<{ row: number; col: number } | null>(null);
+  const [selectionEndTile, setSelectionEndTile] = useState<{ row: number; col: number } | null>(null);
 
   // 🚀 OPTIMIZATION 1: Sparse data structure - only store non-default tiles
   // Key format: "row,col" -> TileData
@@ -125,29 +143,47 @@ export default function VirtualizedPixiGrid() {
 
   // 🚀 OPTIMIZATION 4 & 5: Helper functions for sprite pooling and texture caching
   const getOrCreateSprite = useCallback((imageUrl: string): Sprite | null => {
+    console.log('[Grid] getOrCreateSprite called with URL:', imageUrl.substring(0, 100) + '...');
+
     // Check texture cache first
     let texture = textureCache.get(imageUrl);
 
     if (!texture) {
       try {
         // Load and cache texture (in production, use async loading)
+        console.log('[Grid] Creating new texture from URL');
         texture = Texture.from(imageUrl);
         textureCache.set(imageUrl, texture);
+        console.log('[Grid] Texture created:', { width: texture.width, height: texture.height });
       } catch (err) {
-        console.error(`Failed to load texture: ${imageUrl}`, err);
+        console.error(`[Grid] Failed to load texture: ${imageUrl.substring(0, 100)}`, err);
         return null;
       }
+    } else {
+      console.log('[Grid] Using cached texture');
     }
 
     // Try to reuse sprite from pool
     let sprite = spritePool.current.pop();
     if (!sprite) {
       sprite = new Sprite();
+      console.log('[Grid] Created new sprite');
+    } else {
+      console.log('[Grid] Reused sprite from pool');
     }
 
     sprite.texture = texture;
     sprite.width = TILE_SIZE;
     sprite.height = TILE_SIZE;
+    sprite.visible = true;
+    sprite.alpha = 1;
+
+    console.log('[Grid] Sprite configured:', {
+      width: sprite.width,
+      height: sprite.height,
+      visible: sprite.visible,
+      alpha: sprite.alpha
+    });
 
     return sprite;
   }, []);
@@ -158,22 +194,24 @@ export default function VirtualizedPixiGrid() {
     spritePool.current.push(sprite);
   }, []);
 
-  // 📝 Helper to set tile image (exposed for future image upload feature)
-  // Usage: setTileImage(row, col, imageUrl) to add an uploaded image to a tile
+  // 📝 Helper to set tile image (exposed via ref)
+  // Usage: gridRef.current?.setTileImage(row, col, imageUrl)
   const setTileImage = useCallback((row: number, col: number, imageUrl: string) => {
     const key = `${row},${col}`;
+    console.log(`[Grid] setTileImage called for ${key} with URL:`, imageUrl.substring(0, 100) + '...');
     setTileData((prev) => {
       const newData = new Map(prev);
       newData.set(key, { sold: true, imageUrl });
+      console.log(`[Grid] tileData updated, new size: ${newData.size}, tile ${key} has image:`, newData.get(key));
       return newData;
     });
   }, []);
 
-  // Expose helper for external use (can be accessed via ref or callback prop)
-  useEffect(() => {
-    // You can expose this via window for testing: (window as any).setTileImage = setTileImage;
-    // Or pass it as a prop to parent component
-  }, [setTileImage]);
+  // Expose methods via ref
+  useImperativeHandle(ref, () => ({
+    setTileImage,
+    getTileData: () => tileData,
+  }), [setTileImage, tileData]);
 
   const [viewport, setViewport] = useState({
     width: typeof window !== 'undefined' ? window.innerWidth : 800,
@@ -262,6 +300,71 @@ export default function VirtualizedPixiGrid() {
     return () => cancelAnimationFrame(animationFrame);
   }, []);
 
+  // 🖼️ Update sprites for tiles with images
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const spriteContainer = spriteContainerRef.current as any;
+    if (!spriteContainer) {
+      console.log('[Grid] Sprite container not mounted yet');
+      return;
+    }
+
+    console.log('[Grid] Sprite effect triggered, spriteContainer:', spriteContainer);
+
+    const scaledTileSize = TILE_SIZE * viewport.scale;
+    const startCol = Math.floor(viewport.xOffset / scaledTileSize);
+    const endCol = Math.min(cols, Math.ceil((viewport.xOffset + viewport.width) / scaledTileSize));
+    const startRow = Math.floor(viewport.yOffset / scaledTileSize);
+    const endRow = Math.min(rows, Math.ceil((viewport.yOffset + viewport.height) / scaledTileSize));
+
+    // Find tiles with images in viewport
+    const visibleImageTiles = new Set<string>();
+    for (let row = startRow; row < endRow; row++) {
+      for (let col = startCol; col < endCol; col++) {
+        const key = `${row},${col}`;
+        const tile = tileData.get(key);
+        if (tile?.imageUrl) {
+          visibleImageTiles.add(key);
+          console.log(`[Grid] Found tile with image at ${key}:`, tile.imageUrl.substring(0, 50) + '...');
+        }
+      }
+    }
+
+    console.log(`[Grid] Found ${visibleImageTiles.size} tiles with images in viewport`);
+
+    // Remove sprites for tiles no longer visible
+    activeSpriteMap.current.forEach((sprite, key) => {
+      if (!visibleImageTiles.has(key)) {
+        spriteContainer.removeChild(sprite);
+        returnSpriteToPool(sprite);
+        activeSpriteMap.current.delete(key);
+      }
+    });
+
+    // Add/update sprites for visible image tiles
+    visibleImageTiles.forEach(key => {
+      const tile = tileData.get(key);
+      if (!tile?.imageUrl) return;
+
+      const sprite = activeSpriteMap.current.get(key);
+
+      // Create new sprite if needed
+      if (!sprite) {
+        const newSprite = getOrCreateSprite(tile.imageUrl);
+        if (newSprite) {
+          const [row, col] = key.split(',').map(Number);
+          newSprite.x = col * TILE_SIZE;
+          newSprite.y = row * TILE_SIZE;
+          newSprite.width = TILE_SIZE;
+          newSprite.height = TILE_SIZE;
+          spriteContainer.addChild(newSprite);
+          activeSpriteMap.current.set(key, newSprite);
+          console.log(`[Grid] Sprite created for tile ${key} with image:`, tile.imageUrl.substring(0, 50) + '...');
+        }
+      }
+    });
+  }, [viewport, tileData, rows, cols, getOrCreateSprite, returnSpriteToPool]);
+
   // 🚀 OPTIMIZATION 2 & 6: Batched drawing with LOD (Level of Detail)
   const drawGrid = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -319,6 +422,7 @@ export default function VirtualizedPixiGrid() {
         const availableTiles: Array<{ x: number; y: number }> = [];
         const soldTiles: Array<{ x: number; y: number }> = [];
         const imageTiles: Array<{ x: number; y: number; key: string }> = [];
+        const selectedAvailableTiles: Array<{ x: number; y: number }> = [];
 
         // Collect tiles by type
         for (let row = startRow; row < endRow; row++) {
@@ -327,11 +431,14 @@ export default function VirtualizedPixiGrid() {
             const tile = tileData.get(key);
             const x = col * TILE_SIZE;
             const y = row * TILE_SIZE;
+            const isSelected = selectedTiles?.has(key);
 
             if (tile?.imageUrl) {
               imageTiles.push({ x, y, key });
             } else if (tile?.sold) {
               soldTiles.push({ x, y });
+            } else if (isSelected) {
+              selectedAvailableTiles.push({ x, y });
             } else {
               availableTiles.push({ x, y });
             }
@@ -343,6 +450,16 @@ export default function VirtualizedPixiGrid() {
           g.beginFill(0x4caf50);
           if (!isLowLOD) g.lineStyle(1 / viewport.scale, 0x222222);
           for (const tile of availableTiles) {
+            g.drawRect(tile.x, tile.y, TILE_SIZE, TILE_SIZE);
+          }
+          g.endFill();
+        }
+
+        // Batch draw selected available tiles (yellow/gold highlight)
+        if (selectedAvailableTiles.length > 0) {
+          g.beginFill(0xffd700, 0.8); // Gold color with slight transparency
+          if (!isLowLOD) g.lineStyle(2 / viewport.scale, 0xffaa00); // Orange border
+          for (const tile of selectedAvailableTiles) {
             g.drawRect(tile.x, tile.y, TILE_SIZE, TILE_SIZE);
           }
           g.endFill();
@@ -367,16 +484,34 @@ export default function VirtualizedPixiGrid() {
           }
           g.endFill();
         }
+
+        // Draw selection rectangle if actively selecting
+        if (selectionStartTile.current && selectionEndTile) {
+          const minRow = Math.min(selectionStartTile.current.row, selectionEndTile.row);
+          const maxRow = Math.max(selectionStartTile.current.row, selectionEndTile.row);
+          const minCol = Math.min(selectionStartTile.current.col, selectionEndTile.col);
+          const maxCol = Math.max(selectionStartTile.current.col, selectionEndTile.col);
+
+          g.lineStyle(3 / viewport.scale, 0xffd700, 1);
+          g.beginFill(0xffd700, 0.2);
+          g.drawRect(
+            minCol * TILE_SIZE,
+            minRow * TILE_SIZE,
+            (maxCol - minCol + 1) * TILE_SIZE,
+            (maxRow - minRow + 1) * TILE_SIZE
+          );
+          g.endFill();
+        }
       }
 
       g.eventMode = 'static';
       g.hitArea = new Rectangle(0, 0, cols * TILE_SIZE, rows * TILE_SIZE);
       if (!isGraphicsMounted) setIsGraphicsMounted(true);
     },
-    [viewport.scale, viewport.xOffset, viewport.width, viewport.yOffset, viewport.height, rows, cols, tileData, isGraphicsMounted]
+    [viewport.scale, viewport.xOffset, viewport.width, viewport.yOffset, viewport.height, rows, cols, tileData, isGraphicsMounted, selectedTiles, selectionEndTile]
   );
 
-  // 🔹 Tile click (only fires if not dragging)
+  // 🔹 Tile click and selection (only fires if not dragging)
   const handlePointerDown = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (event: any) => {
@@ -386,17 +521,31 @@ export default function VirtualizedPixiGrid() {
       // Store pointer position for click detection
       const pos = event.data.getLocalPosition(container);
       pointerDownPos.current = { x: pos.x, y: pos.y };
+
+      // Check if Shift key is pressed for selection mode
+      if (event.data.originalEvent?.shiftKey) {
+        const col = Math.floor(pos.x / TILE_SIZE);
+        const row = Math.floor(pos.y / TILE_SIZE);
+
+        if (col >= 0 && col < cols && row >= 0 && row < rows) {
+          // Start selection mode
+          setIsSelectionMode(true);
+          selectionStartTile.current = { row, col };
+          setSelectionEndTile({ row, col });
+        }
+      }
     },
-    []
+    [cols, rows]
   );
 
   const handlePointerMove = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (event: any) => {
+      const container = containerRef.current;
+      if (!container) return;
+
       // Track movement within PixiJS canvas
       if (pointerDownPos.current.x !== 0 || pointerDownPos.current.y !== 0) {
-        const container = containerRef.current;
-        if (!container) return;
         const pos = event.data.getLocalPosition(container);
         const dx = Math.abs(pos.x - pointerDownPos.current.x);
         const dy = Math.abs(pos.y - pointerDownPos.current.y);
@@ -405,23 +554,54 @@ export default function VirtualizedPixiGrid() {
         if (dx > 5 || dy > 5) {
           hasMoved.current = true;
         }
+
+        // Update selection rectangle if in selection mode
+        if (isSelectionMode && selectionStartTile.current) {
+          const col = Math.floor(pos.x / TILE_SIZE);
+          const row = Math.floor(pos.y / TILE_SIZE);
+
+          if (col >= 0 && col < cols && row >= 0 && row < rows) {
+            setSelectionEndTile({ row, col });
+          }
+        }
       }
     },
-    []
+    [isSelectionMode, cols, rows]
   );
 
   const handlePointerUp = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (event: any) => {
-      // Only trigger click if user didn't drag
-      if (!hasMoved.current) {
+      // Handle selection mode completion
+      if (isSelectionMode && selectionStartTile.current && selectionEndTile && onSelectionChange) {
+        const minRow = Math.min(selectionStartTile.current.row, selectionEndTile.row);
+        const maxRow = Math.max(selectionStartTile.current.row, selectionEndTile.row);
+        const minCol = Math.min(selectionStartTile.current.col, selectionEndTile.col);
+        const maxCol = Math.max(selectionStartTile.current.col, selectionEndTile.col);
+
+        // Notify parent of selection
+        onSelectionChange(minRow, minCol, maxRow, maxCol);
+
+        // Reset selection mode
+        setIsSelectionMode(false);
+        selectionStartTile.current = null;
+        setSelectionEndTile(null);
+      }
+      // Only trigger click if user didn't drag and not in selection mode
+      else if (!hasMoved.current && !isSelectionMode) {
         const container = containerRef.current;
         if (!container) return;
         const pos = event.data.getLocalPosition(container);
         const col = Math.floor(pos.x / TILE_SIZE);
         const row = Math.floor(pos.y / TILE_SIZE);
         if (col >= 0 && col < cols && row >= 0 && row < rows) {
-          alert(`🟩 Tile clicked!\nCoordinates: (${col}, ${row})`);
+          const key = `${row},${col}`;
+          const tile = tileData.get(key);
+
+          // Call parent's click handler if provided
+          if (onTileClick) {
+            onTileClick(row, col, tile);
+          }
         }
       }
 
@@ -429,7 +609,7 @@ export default function VirtualizedPixiGrid() {
       pointerDownPos.current = { x: 0, y: 0 };
       hasMoved.current = false;
     },
-    [rows, cols]
+    [rows, cols, tileData, onTileClick, isSelectionMode, selectionEndTile, onSelectionChange]
   );
 
   // 🔹 Attach pointer listeners
@@ -644,9 +824,14 @@ export default function VirtualizedPixiGrid() {
             scale={viewport.scale}
           >
             <pixiGraphics ref={graphicsRef} draw={drawGrid} />
+            <pixiContainer ref={spriteContainerRef} />
           </pixiContainer>
         </Application>
       </div>
     </>
   );
-}
+});
+
+VirtualizedPixiGrid.displayName = 'VirtualizedPixiGrid';
+
+export default VirtualizedPixiGrid;
